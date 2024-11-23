@@ -1,9 +1,15 @@
+#!/usr/bin/python3
+
+import sys
+import json
 import imutils
 import numpy as np
 import cv2
+import os
 from math import ceil
 from model import CNN_Model
 from collections import defaultdict
+from pathlib import Path
 
 
 def get_x(s):
@@ -137,7 +143,13 @@ def map_answer(idx):
 
 def get_answers(list_answers):
     results = defaultdict(list)
-    model = CNN_Model('weight.h5').build_model(rt=True)
+
+    path_to_script = Path(__file__)
+    if path_to_script.is_symlink():
+        path_to_script = path_to_script.readlink()
+
+    weight_path = path_to_script.with_name('weight.h5')
+    model = CNN_Model(weight_path).build_model(rt=True)
     list_answers = np.array(list_answers)
     scores = model.predict_on_batch(list_answers / 255.0)
     for idx, score in enumerate(scores):
@@ -152,9 +164,9 @@ def get_answers(list_answers):
 
 
 if __name__ == '__main__':
-    img = cv2.imread('test1.jpg')
+    img = cv2.imread(sys.argv[1])
     list_ans_boxes = crop_image(img)
     list_ans = process_ans_blocks(list_ans_boxes)
     list_ans = process_list_ans(list_ans)
     answers = get_answers(list_ans)
-    print(answers)
+    print(json.dumps(answers))

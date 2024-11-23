@@ -87,7 +87,7 @@ class CNN_Model(object):
         reduce_lr = ReduceLROnPlateau(monitor='val_acc', factor=0.2, patience=5, verbose=1, )
 
         # Model Checkpoint
-        cpt_save = ModelCheckpoint('./weight.h5', save_best_only=True, monitor='val_acc', mode='max')
+        cpt_save = ModelCheckpoint(self.weight_path, save_best_only=True, monitor='val_acc', mode='max')
 
         print("Training......")
         self.model.fit(images, labels, callbacks=[cpt_save, reduce_lr], verbose=1, epochs=10, validation_split=0.15, batch_size=32,
