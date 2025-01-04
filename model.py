@@ -1,3 +1,4 @@
+import silence_tensorflow.auto
 from tensorflow.keras.layers import Dense, Conv2D, MaxPooling2D, Dropout, Flatten
 from tensorflow.keras.models import Sequential
 from tensorflow.keras import optimizers

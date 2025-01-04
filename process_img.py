@@ -1,6 +1,7 @@
-#!/usr/bin/python3
+#!/usr/bin/env python3
 
 import json
+from pathlib import Path
 import sys
 import imutils
 import numpy as np
@@ -55,7 +56,7 @@ def crop_image(img):
             x_curr, y_curr, w_curr, h_curr = cv2.boundingRect(c)
             area = w_curr * h_curr
             if area > 100000:
-                print(f"Contour {i + 1}: x={x_curr}, y={y_curr}, w={w_curr}, h={h_curr}")
+                # print(f"Contour {i + 1}: x={x_curr}, y={y_curr}, w={w_curr}, h={h_curr}")
                 cv2.rectangle(img, (x_curr, y_curr), (x_curr + w_curr, y_curr + h_curr), (0, 255, 0), 2)
 
             if 200000> w_curr * h_curr > 110000:
@@ -80,16 +81,16 @@ def crop_image(img):
                     y_old = y_curr
                     w_old = w_curr
                     h_old = h_curr
-        print(f"Number of contours found: {len(cnts)}")
+        # print(f"Number of contours found: {len(cnts)}")
         # sort ans_blocks according to x coordinate
         sorted_ans_blocks = sorted(ans_blocks, key=get_x)
-        cv2.imshow("Contours", img)
-        cv2.waitKey(0)
-        cv2.destroyAllWindows()
-        print(f"Number of answer blocks detected: {len(ans_blocks)}")
-        for idx, block in enumerate(ans_blocks):
-            x, y, w, h = block[1]
-            print(f"Ans_block {idx + 1}: x={x}, y={y}, w={w}, h={h}")
+        # cv2.imshow("Contours", img)
+        # cv2.waitKey(0)
+        # cv2.destroyAllWindows()
+        # print(f"Number of answer blocks detected: {len(ans_blocks)}")
+        # for idx, block in enumerate(ans_blocks):
+            # x, y, w, h = block[1]
+            # print(f"Ans_block {idx + 1}: x={x}, y={y}, w={w}, h={h}")
         return sorted_ans_blocks
 
 
@@ -117,7 +118,7 @@ def process_ans_blocks(ans_blocks):
             for j in range(5):
                 list_answers.append(box_img[j * offset2:(j + 1) * offset2, :])
     
-    print(f"Total number of answer areas: {len(list_answers)}")
+    # print(f"Total number of answer areas: {len(list_answers)}")
     return list_answers
 
 
@@ -131,7 +132,7 @@ def process_list_ans(list_answers):
             bubble_choice = answer_img[:, start + i * offset:start + (i + 1) * offset]
             bubble_choice = cv2.threshold(bubble_choice, 0, 255, cv2.THRESH_BINARY_INV | cv2.THRESH_OTSU)[1]
             if bubble_choice.size == 0:
-                print("Error: Empty image passed to resize.")
+                # print("Error: Empty image passed to resize.")
                 continue  # Bỏ qua vòng lặp hiện tại nếu hình ảnh rỗng
 
             bubble_choice = cv2.resize(bubble_choice, (28, 28), cv2.INTER_AREA)
@@ -158,7 +159,13 @@ def map_answer(idx):
 
 def get_answers(list_answers):
     results = defaultdict(list)
-    model = CNN_Model('weight.h5').build_model(rt=True)
+    
+    path_to_script = Path(__file__)
+    if path_to_script.is_symlink():
+        path_to_script = path_to_script.readlink()
+    weight_path = path_to_script.with_name('weight.h5')
+    model = CNN_Model(weight_path).build_model(rt=True)
+    
     list_answers = np.array(list_answers)
     scores = model.predict_on_batch(list_answers / 255.0)
     for idx, score in enumerate(scores):
