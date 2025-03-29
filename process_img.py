@@ -109,9 +109,9 @@ def process_ans_blocks(ans_blocks):
         # Loop over each box in answer block
         for i in range(6):
             box_img = np.array(ans_block_img[i * offset1:(i + 1) * offset1, :])
-            height_box = box_img.shape[0]
+            # height_box = box_img.shape[0]
 
-            box_img = box_img[14:height_box - 14, :]
+            # box_img = box_img[14:height_box - 14, :]
             offset2 = ceil(box_img.shape[0] / 5)
 
             # loop over each line in a box
