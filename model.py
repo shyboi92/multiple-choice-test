@@ -1,8 +1,8 @@
-from tensorflow.keras.layers import Dense, Conv2D, MaxPooling2D, Dropout, Flatten # type: ignore
-from tensorflow.keras.models import Sequential # type: ignore
-from tensorflow.keras import optimizers # type: ignore
-from tensorflow.keras.utils import to_categorical # type: ignore
-from tensorflow.keras.callbacks import ReduceLROnPlateau, ModelCheckpoint # type: ignore
+from tensorflow.keras.layers import Dense, Conv2D, MaxPooling2D, Dropout, Flatten
+from tensorflow.keras.models import Sequential
+from tensorflow.keras import optimizers
+from tensorflow.keras.utils import to_categorical
+from tensorflow.keras.callbacks import ReduceLROnPlateau, ModelCheckpoint
 
 from pathlib import Path
 import cv2
