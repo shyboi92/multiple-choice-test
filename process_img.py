@@ -7,10 +7,14 @@ import imutils
 import numpy as np
 import cv2
 import logging
+import base64
 from math import ceil
 from model import CNN_Model
 from collections import defaultdict
+from ultralytics import YOLO
+import os
 
+os.environ['TF_CPP_MIN_LOG_LEVEL'] = '3'  # Tắt log TensorFlow
 # Đặt biến này thành True
 # để hiện các kết quả và thông tin phục vụ debug
 DEBUG=False
@@ -36,12 +40,12 @@ def get_x_ver1(s):
 	s = cv2.boundingRect(s)
 	return s[0] * s[1]
 
-def get_contour_corners(contour):
-	peri = cv2.arcLength(contour, True)
-	approx = cv2.approxPolyDP(contour, 0.02 * peri, True)
-	if len(approx) == 4:
-		return approx.reshape(4, 2)
-	return None
+# def get_contour_corners(contour):
+# 	peri = cv2.arcLength(contour, True)
+# 	approx = cv2.approxPolyDP(contour, 0.02 * peri, True)
+# 	if len(approx) == 4:
+# 		return approx.reshape(4, 2)
+# 	return None
 
 def order_corners(corners):
 	rect = np.zeros((4, 2), dtype="float32")
@@ -73,37 +77,6 @@ def perspective_transform(img, corners):
 	warped = cv2.warpPerspective(img, M, (maxWidth, maxHeight))
 	return warped, M
 
-def detect_and_warp(image, low_thresh=20, high_thresh=80):
-	orig_h, orig_w = image.shape[:2]
-	target_h = 500
-	ratio = orig_h / target_h
-	new_w = int(orig_w / ratio)
-	img = cv2.resize(image, (new_w, target_h))
-
-	# Preprocessing
-	gray = cv2.cvtColor(img, cv2.COLOR_BGR2GRAY)
-	gray = cv2.GaussianBlur(gray, (5, 5), 0)
-	edged = cv2.Canny(gray, low_thresh, high_thresh)
-
-	cnts, _ = cv2.findContours(edged, cv2.RETR_LIST, cv2.CHAIN_APPROX_SIMPLE)
-	cnts = sorted(cnts, key=lambda c: cv2.contourArea(c), reverse=True)[:5]
-
-	for c in cnts:
-		peri = cv2.arcLength(c, True)
-		approx = cv2.approxPolyDP(c, 0.02 * peri, True)
-		if len(approx) == 4 and cv2.contourArea(approx) > 10000:
-			pts = approx.reshape(4, 2) * ratio
-			return pts  # Trả về 4 điểm giấy A4 (trên ảnh gốc)
-
-	return None
-
-def is_well_aligned(corners, img_shape, tolerance=10):
-	(h, w) = img_shape[:2]
-	ordered = order_corners(corners)
-	expected_corners = np.array([[0, 0], [w, 0], [w, h], [0, h]], dtype="float32")
-	diffs = np.abs(ordered - expected_corners)
-	return np.all(diffs < tolerance)
-
 def scale_image(img, target_height=1100):
 	h, w = img.shape[:2]
 	scale = target_height / h
@@ -123,70 +96,63 @@ def is_similar(x, y, w, h, rx, ry, rw, rh, tolerance=0.4, min_h=600):
 	# Chỉ cần w,h,area đều match
 	return w_match and h_match and area_match and h >= min_h
 
-def is_scanned_image(img, verbose=DEBUG):
-	h, w = img.shape[:2]
-	ratio = w / h
-	is_ratio_ok = abs(ratio - 0.707) < 0.06  # KHÔNG dùng như điều kiện chính nữa
+def detect_and_warp_yolo4points(img, model_path=None):
+    if model_path is None:
+        # Luôn lấy theo vị trí file script
+        script_dir = os.path.dirname(os.path.abspath(__file__))
+        model_path = os.path.join(script_dir, 'runs', 'detect', 'train7', 'weights', 'best.pt')
 
-	# Convert về gray nếu là ảnh màu
-	if len(img.shape) == 3 and img.shape[2] == 3:
-		gray = cv2.cvtColor(img, cv2.COLOR_BGR2GRAY)
-		is_gray = False
-	else:
-		gray = img.copy()
-		is_gray = True
+    if not os.path.exists(model_path):
+        raise FileNotFoundError(f"Không tìm thấy YOLO model tại: {model_path}")
+    model = YOLO(model_path, verbose= False)
+    results = model(img, verbose = False )[0]
+    points = {'top_left': None, 'top_right': None, 'bottom_right': None, 'bottom_left': None}
 
-	# Viền sáng
-	border_pixels = np.concatenate([
-		gray[:10, :].flatten(),
-		gray[-10:, :].flatten(),
-		gray[:, :10].flatten(),
-		gray[:, -10:].flatten(),
-	])
-	border_brightness = np.mean(border_pixels)
-	is_white_border = border_brightness > 200
+    for box, cls in zip(results.boxes.xyxy, results.boxes.cls):
+        x1, y1, x2, y2 = map(int, box)
+        cx, cy = (x1 + x2) // 2, (y1 + y2) // 2
+        label = model.names[int(cls)]
+        points[label] = (cx, cy)
+        if DEBUG:
+            logging.debug(f" Detected {label}: ({cx}, {cy})")
 
-	# Độ nhiễu thấp
-	std_dev = np.std(gray)
-	is_low_noise = std_dev < 70
+    if all(points.values()):
+        corners = np.array([
+            points['top_left'],
+            points['top_right'],
+            points['bottom_right'],
+            points['bottom_left']
+        ], dtype="float32")
+        return perspective_transform(img, corners)
 
-	# ❗ Đổi cách tính: chỉ cần 2 trong 2 đặc trưng chính → SCANNED
-	result = is_white_border and is_low_noise
+    return None, None
 
-	if verbose:
-		logging.debug("🔍 [Scan Detection Debug]")
-		logging.debug(f"- Ratio = {ratio:.4f} → {'OK' if is_ratio_ok else 'NO'}")
-		logging.debug(f"- Gray image? → {is_gray}")
-		logging.debug(f"- Border brightness = {border_brightness:.2f} → {'OK' if is_white_border else 'NO'}")
-		logging.debug(f"- Gray std deviation = {std_dev:.2f} → {'OK' if is_low_noise else 'NO'}")
-		logging.debug(f"=> ✅ Final result: {'SCANNED' if result else 'NOT SCANNED'}")
-		logging.debug(f"==> RETURN VALUE: {result}")
+def enhance_for_pencil(img):
+    if len(img.shape) == 3:
+        gray = cv2.cvtColor(img, cv2.COLOR_BGR2GRAY)
+    else:
+        gray = img.copy()
 
-	return result
+    # Làm mịn nhẹ để giảm noise
+    blurred = cv2.GaussianBlur(gray, (3, 3), 0)
 
+    # CLAHE để tăng tương phản nét tô mờ
+    clahe = cv2.createCLAHE(clipLimit=2.5, tileGridSize=(8, 8))
+    enhanced = clahe.apply(blurred)
+
+    # Ngưỡng OTSU — giữ màu gốc (vùng tô đen, nền trắng)
+    _, threshed = cv2.threshold(enhanced, 0, 255, cv2.THRESH_BINARY + cv2.THRESH_OTSU)
+
+    return threshed
 
 def determine_answer_blocks(img):
-	if DEBUG:
-		logging.debug("=== Bắt đầu kiểm tra ảnh ===")
+	warped_img, M = detect_and_warp_yolo4points(img)
+	if warped_img is None:
+		raise ValueError("Không tìm thấy đủ 4 góc A4 để warp.")
 
-	if not is_scanned_image(img):  # CHẮC CHẮN PHẢI DÙNG not
-		logging.debug("→ Ảnh chưa scan → gọi detect_and_warp")
-		paper_pts = detect_and_warp(img)
-		if paper_pts is not None:
-			img, M = perspective_transform(img, paper_pts)
-		else:
-			raise ValueError("Không tìm thấy giấy A4.")
-	else:
-		logging.debug("→ Ảnh đã scan → bỏ qua bước detect")
-		M = None
-
-	img, scale = scale_image(img)
-
-	warped_img = img.copy()
-	# cv2.imshow("Warped Paper", warped_img)
-	# cv2.waitKey(0)
-
-	gray_img = cv2.cvtColor(img, cv2.COLOR_BGR2GRAY)
+	enhanced = enhance_for_pencil(warped_img)
+	img, scale = scale_image(enhanced)
+	gray_img = img.copy()
 	blurred = cv2.GaussianBlur(gray_img, (5, 5), 0)
 	img_canny = cv2.Canny(blurred, 50, 150)
 
@@ -199,13 +165,13 @@ def determine_answer_blocks(img):
 	# img_contours = img.copy()
 
 	# for i, c in enumerate(cnts):
-	#     x, y, w, h = cv2.boundingRect(c)
-	#     area = cv2.contourArea(c)
-	#     cv2.rectangle(img_contours, (x, y), (x + w, y + h), (0, 255, 0), 2)
-	#     cv2.putText(img_contours, f"#{i+1} ({w}x{h}) {area:.0f}", (x, y - 10),
-	#                 cv2.FONT_HERSHEY_SIMPLEX, 0.5, (0, 0, 255), 1)
+	# 	x, y, w, h = cv2.boundingRect(c)
+	# 	area = cv2.contourArea(c)
+	# 	cv2.rectangle(img_contours, (x, y), (x + w, y + h), (0, 255, 0), 2)
+	# 	cv2.putText(img_contours, f"#{i+1} ({w}x{h}) {area:.0f}", (x, y - 10),
+	# 				cv2.FONT_HERSHEY_SIMPLEX, 0.5, (0, 0, 255), 1)
 
-	#     logging.debug(f"Contour {i+1}: x={x}, y={y}, w={w}, h={h}, area={area:.0f}")
+	# 	logging.debug(f"Contour {i+1}: x={x}, y={y}, w={w}, h={h}, area={area:.0f}")
 
 	# # Show hình có 5 contour lớn nhất
 	# cv2.imshow("Top 5 Contours", img_contours)
@@ -213,18 +179,16 @@ def determine_answer_blocks(img):
 	# cv2.waitKey(0)
 
 	cnts = sorted(cnts, key=cv2.contourArea, reverse=True)
-
-
 	ans_blocks = []
 	mssv_block = []
 
 	# Đây là 3 block mẫu mới
 	ref_blocks = [
-	(543, 331, 214, 700),
-	(293, 332, 215, 700),
-	(51, 332, 212, 700)]
+	(580, 388, 227, 691),
+	(308, 390, 224, 689),
+	(34, 391, 227, 688)]
 
-	ref_blocks2 = (440, 33, 241, 337)
+	ref_blocks2 = (400, 7, 286, 360)
 
 	found = set()
 	enhanced = gray_img  
@@ -239,7 +203,7 @@ def determine_answer_blocks(img):
 				found.add(i)
 				break
 		# Kiểm tra block MSSV
-		if is_similar(x, y, w, h, *ref_blocks2, tolerance=0.2, min_h=200):
+		if is_similar(x, y, w, h, *ref_blocks2, tolerance=0.3, min_h=200) and x>300:
 			mssv_block.append((enhanced[y:y + h, x:x + w], [x, y, w, h]))
 
 	if len(ans_blocks) == 0:
@@ -268,7 +232,7 @@ def determine_answer_blocks(img):
 		raise AssertionError("Không tìm thấy vùng MSSV.")
 				
 
-	return sorted_ans_blocks, warped_img, scale, M, mssv_block\
+	return sorted_ans_blocks, img, scale, M, mssv_block
 
 def process_ans_blocks(ans_blocks):
 	list_answers = []
@@ -278,7 +242,11 @@ def process_ans_blocks(ans_blocks):
 		ans_block_img = np.array(ans_block[0])
 		block_x, block_y, block_w, block_h = ans_block[1]
 
-		vis_img = cv2.cvtColor(ans_block_img.copy(), cv2.COLOR_GRAY2BGR)
+		# Chuyển sang ảnh màu nếu đang là ảnh xám
+		if len(ans_block_img.shape) == 2:
+			vis_img = cv2.cvtColor(ans_block_img.copy(), cv2.COLOR_GRAY2BGR)
+		else:
+			vis_img = ans_block_img.copy()
 
 		offset1 = ceil(ans_block_img.shape[0] / 4)
 		for i in range(4):
@@ -322,6 +290,13 @@ def process_list_ans(list_answers, list_positions):
 			x1 = start + i * offset
 			x2 = start + (i + 1) * offset
 			bubble_choice = answer_img[:, x1:x2]
+			# Nếu chưa là grayscale thì chuyển
+			if bubble_choice.ndim == 3 and bubble_choice.shape[2] == 3:
+				bubble_choice = cv2.cvtColor(bubble_choice, cv2.COLOR_BGR2GRAY)
+
+			# Đảm bảo đúng kiểu
+			if bubble_choice.dtype != np.uint8:
+				bubble_choice = bubble_choice.astype(np.uint8)
 			bubble_choice = cv2.threshold(bubble_choice, 0, 255, cv2.THRESH_BINARY_INV | cv2.THRESH_OTSU)[1]
 
 			if bubble_choice.size == 0:
@@ -366,14 +341,17 @@ def get_answers(list_answers):
 		question = idx // 4
 
 		# score [unchoiced_cf, choiced_cf]
-		if score[1] > 0.5:  # choiced confidence score > 0.9
+		if score[1] > 0.9:  # choiced confidence score > 0.9
 			chosed_answer = map_answer(idx)
 			results[question + 1].append(chosed_answer)
 
 	return results
 
 def process_mssv_block(mssv_block):
+	
 	mssv_img = mssv_block[0]
+	if mssv_img.ndim == 3 and mssv_img.shape[2] == 3:
+		mssv_img = cv2.cvtColor(mssv_img, cv2.COLOR_BGR2GRAY)
 	h, w = mssv_img.shape[:2]
 
 	row_h = h // 10  # vẫn chia 10 hàng
@@ -400,11 +378,23 @@ def process_mssv_block(mssv_block):
 			y1 = row * row_h
 			y2 = (row + 1) * row_h
 			cell = mssv_img[y1:y2, x1:x2]
+
+			# print(f"Cell {col},{row} shape:", cell.shape)
+
+			if cell is None or cell.size == 0 or cell.shape[0] < 5 or cell.shape[1] < 5:
+				print(f" Skipping invalid cell {col},{row}")
+				continue
+			if cell.ndim == 3 and cell.shape[2] != 1:
+				cell = cv2.cvtColor(cell, cv2.COLOR_BGR2GRAY)
+
+			if cell.dtype != np.uint8:
+				cell = cell.astype(np.uint8)
 			cell = cv2.threshold(cell, 0, 255, cv2.THRESH_BINARY_INV | cv2.THRESH_OTSU)[1]
 			digit_col.append(cell)
 
 		digits_matrix.append(digit_col)
-
+	# print("Cell shape:", cell.shape)
+	# print("dtype:", cell.dtype)
 	# Load model CNN
 	model = CNN_Model('weight.h5').build_model(rt=True)
 
@@ -414,6 +404,13 @@ def process_mssv_block(mssv_block):
 	for col_idx, column in enumerate(digits_matrix):
 		column_imgs = [cv2.resize(digit, (28, 28)).reshape(28, 28, 1) for digit in column]
 		column_imgs = np.array(column_imgs) / 255.0
+		if len(column_imgs) == 0:
+			print(f"Bỏ qua cột {col_idx + 1} vì không có ảnh hợp lệ")
+			if col_idx < 5:
+				mssv_digits += "?"
+			else:
+				ma_de_digits += "?"
+			continue
 		preds = model.predict_on_batch(column_imgs)
 
 		# Lấy số có xác suất tô cao
@@ -431,20 +428,15 @@ def process_mssv_block(mssv_block):
 				ma_de_digits += "?"
 
 	# Hiển thị toàn bộ ô MSSV để debug
-	if DEBUG:
-		fig, axes = plt.subplots(10, 8, figsize=(12, 15))  # 10 hàng, 8 cột
-		fig.suptitle("Các ô trong block MSSV", fontsize=16)
+	# if DEBUG:
+	# 	for col_idx in range(8):
+	# 		for row_idx in range(10):
+	# 			cell = digits_matrix[col_idx][row_idx]
+	# 			cv2.imshow(f"C{col_idx+1}_R{row_idx}", cell)
+	# 			cv2.waitKey(100)  # Hiển thị 100ms mỗi ô
 
-		for col_idx in range(8):
-			for row_idx in range(10):
-				ax = axes[row_idx, col_idx]
-				ax.imshow(digits_matrix[col_idx][row_idx], cmap='gray')
-				ax.axis('off')
-				ax.set_title(f"C{col_idx+1} R{row_idx}", fontsize=6)
+	# 	cv2.destroyAllWindows()
 
-		plt.tight_layout()
-		plt.subplots_adjust(top=0.95)
-		plt.show()
 
 	return mssv_digits, ma_de_digits
 
@@ -462,14 +454,14 @@ if __name__ == '__main__':
 	height = int(img.shape[0] * scale_percent / 100)
 	dim = (width, height)
 	resized_img = cv2.resize(img, dim, interpolation=cv2.INTER_AREA)
-
+	
 	# Xử lý ảnh
 	list_ans_boxes, warped_img, scale, M, mssv_block = determine_answer_blocks(img)
 	mssv_digits, ma_de_digits = process_mssv_block(mssv_block[0])
 	list_answers, list_positions = process_ans_blocks(list_ans_boxes)
 	list_ans, choice_positions = process_list_ans(list_answers, list_positions)
 	answers = get_answers(list_ans)
-	# logging.debug(answers)
+	logging.debug(answers)
 
 	for idx, (x1, y1, x2, y2) in enumerate(choice_positions):
 		question_number = idx // 4 + 1
@@ -481,15 +473,17 @@ if __name__ == '__main__':
 			
 	# In lên ảnh MSSV và mã đề
 	cv2.putText(warped_img, f"MSSV: {mssv_digits}", (30, 30),
-				cv2.FONT_HERSHEY_SIMPLEX, 0.8, (255, 0, 0), 2)
+				cv2.FONT_HERSHEY_SIMPLEX, 0.8, (0, 0, 0), 2)
 	cv2.putText(warped_img, f"Ma de: {ma_de_digits}", (30, 60),
-				cv2.FONT_HERSHEY_SIMPLEX, 0.8, (255, 0, 0), 2)
+				cv2.FONT_HERSHEY_SIMPLEX, 0.8, (0, 0, 0), 2)
 	
 	# Tạo đối tượng JSON tổng
+	warped_img_jpg = cv2.imencode('.jpg', warped_img)
 	output = {
 		"mssv": mssv_digits,
 		"ma_de": ma_de_digits,
-		"answers": answers
+		"answers": answers,
+		"result_img": base64.b64encode(warped_img_jpg[1]).decode()
 	}
 
 	# In ra JSON (pretty format)

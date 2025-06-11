@@ -7,10 +7,13 @@ from tensorflow.keras.callbacks import ReduceLROnPlateau, ModelCheckpoint
 from pathlib import Path
 import cv2
 import numpy as np
-
+import os
 
 class CNN_Model(object):
 	def __init__(self, weight_path=None):
+		if weight_path and not os.path.isabs(weight_path):
+			# resolve đường dẫn tuyệt đối dựa theo file model.py
+			weight_path = os.path.join(os.path.dirname(__file__), weight_path)
 		self.weight_path = weight_path
 		self.model = None
 
