@@ -14,6 +14,7 @@ from collections import defaultdict
 from ultralytics import YOLO
 import os
 
+sys.stdout = open(sys.stdout.fileno(), mode='w', encoding='utf8', buffering=1)
 os.environ['TF_CPP_MIN_LOG_LEVEL'] = '3'  # Tắt log TensorFlow
 # Đặt biến này thành True
 # để hiện các kết quả và thông tin phục vụ debug
