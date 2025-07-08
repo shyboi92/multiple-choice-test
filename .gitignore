@@ -1,7 +1,7 @@
 *
 !.gitignore
+!.vscode/launch.json
 !model.py
 !process_img.py
 !requirements.txt
 !weight.h5
-!.vscode/launch.json

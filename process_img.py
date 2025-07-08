@@ -77,7 +77,7 @@ def perspective_transform(img, corners):
 	warped = cv2.warpPerspective(img, M, (maxWidth, maxHeight))
 	return warped, M
 
-def scale_image(img, target_height=1100):
+def scale_image(img, target_height=1000):
 	h, w = img.shape[:2]
 	scale = target_height / h
 	new_size = (int(w * scale), target_height)
@@ -137,7 +137,7 @@ def enhance_for_pencil(img):
     blurred = cv2.GaussianBlur(gray, (3, 3), 0)
 
     # CLAHE để tăng tương phản nét tô mờ
-    clahe = cv2.createCLAHE(clipLimit=2.5, tileGridSize=(8, 8))
+    clahe = cv2.createCLAHE(clipLimit=1.0, tileGridSize=(8, 8))
     enhanced = clahe.apply(blurred)
 
     # Ngưỡng OTSU — giữ màu gốc (vùng tô đen, nền trắng)
@@ -150,9 +150,14 @@ def determine_answer_blocks(img):
 	if warped_img is None:
 		raise ValueError("Không tìm thấy đủ 4 góc A4 để warp.")
 
-	enhanced = enhance_for_pencil(warped_img)
-	img, scale = scale_image(enhanced)
-	gray_img = img.copy()
+	img, scale = scale_image(warped_img)
+	enhanced = enhance_for_pencil(img)
+	gray_img = enhanced.copy()
+	
+	# enhanced = enhance_for_pencil(warped_img)
+	# img, scale = scale_image(enhanced)
+	# gray_img = img.copy()
+	
 	blurred = cv2.GaussianBlur(gray_img, (5, 5), 0)
 	img_canny = cv2.Canny(blurred, 50, 150)
 
@@ -203,9 +208,59 @@ def determine_answer_blocks(img):
 				found.add(i)
 				break
 		# Kiểm tra block MSSV
-		if is_similar(x, y, w, h, *ref_blocks2, tolerance=0.3, min_h=200) and x>300:
+		if is_similar(x, y, w, h, *ref_blocks2, tolerance=0.35, min_h=200) and x>300:
 			mssv_block.append((enhanced[y:y + h, x:x + w], [x, y, w, h]))
 
+	# Fallback nếu thiếu block
+	if len(ans_blocks) == 1:
+		x1, y1, w1, h1 = ans_blocks[0][1]
+		distances = [abs(x1 - rx) for rx, _, _, _ in ref_blocks]
+		idx = distances.index(min(distances))
+		ref_x, _, _, _ = ref_blocks[idx]
+		dx = x1 - ref_x
+
+		# Nếu là cột trái (idx == 2), tính 2 cái còn lại theo kiểu đều nhau
+		if idx == 2:
+			step = int(w1 / 5 * 6.2)
+			x2 = x1 + step
+			x3 = x2 + step
+			for x_new in [x2, x3]:
+				ans_blocks.append((enhanced[y1:y1+h1, x_new:x_new+w1], [x_new, y1, w1, h1]))
+		else:
+			# fallback cách cũ cho trường hợp khác
+			for i, (rx, ry, rw, rh) in enumerate(ref_blocks):
+				if i == idx:
+					continue
+				x_new = rx + dx
+				y_new = y1
+				ans_blocks.append((enhanced[y_new:y_new+rh, x_new:x_new+rw], [x_new, y_new, rw, rh]))
+
+	elif len(ans_blocks) == 2:
+		matched = {}
+		for block in ans_blocks:
+			x_real = block[1][0]
+			distances = [abs(x_real - rx) for rx, _, _, _ in ref_blocks]
+			best = distances.index(min(distances))
+			matched[best] = block
+
+		missing = [i for i in range(3) if i not in matched][0]
+		i1, i2 = list(matched.keys())
+		x1, _ = matched[i1][1][:2]
+		x2, _ = matched[i2][1][:2]
+		r1 = ref_blocks[i1][0]
+		r2 = ref_blocks[i2][0]
+		rm = ref_blocks[missing][0]
+
+		# scale theo độ chênh ref và thực tế
+		scale = (x2 - x1) / (r2 - r1)
+		x_new = int(x1 + (rm - r1) * scale)
+		y_new = int((matched[i1][1][1] + matched[i2][1][1]) / 2)
+		w_new = int((matched[i1][1][2] + matched[i2][1][2]) / 2)
+		h_new = int((matched[i1][1][3] + matched[i2][1][3]) / 2)
+		ans_blocks.append((enhanced[y_new:y_new+h_new, x_new:x_new+w_new], [x_new, y_new, w_new, h_new]))
+
+	elif len(ans_blocks) == 0:
+		raise AssertionError('Không tìm thấy vùng đáp án.')
 	if len(ans_blocks) == 0:
 		raise AssertionError('Không tìm thấy vùng đáp án.')
 
@@ -265,16 +320,15 @@ def process_ans_blocks(ans_blocks):
 				list_positions.append((x1, y1, x2, y2))
 
 				# In tọa độ ô đang xử lý
-				# logging.debug(f'Block {block_idx + 1}, Group {i + 1}, Answer {j + 1}: Position = ({x1}, {y1}, {x2}, {y2})')
+				logging.debug(f'Block {block_idx + 1}, Group {i + 1}, Answer {j + 1}: Position = ({x1}, {y1}, {x2}, {y2})')
 				
-	#             cv2.rectangle(vis_img, (0, j * offset2), (ans_block_img.shape[1] - 1, (j + 1) * offset2), (255, 0, 0), 1)
-
-	#     cv2.imshow(f'Block {block_idx + 1} - Split lines', vis_img)
+				cv2.rectangle(vis_img, (0, j * offset2), (ans_block_img.shape[1] - 1, (j + 1) * offset2), (255, 0, 0), 1)
+		# cv2.imshow(f'Block {block_idx + 1} - Split lines', vis_img)
 	
-	# cv2.waitKey(0)
-	# cv2.destroyAllWindows()
+	cv2.waitKey(0)
+	cv2.destroyAllWindows()
 
-	# logging.debug(list_positions)
+	logging.debug(list_positions)
 	return list_answers, list_positions
 
 def process_list_ans(list_answers, list_positions):
@@ -341,7 +395,7 @@ def get_answers(list_answers):
 		question = idx // 4
 
 		# score [unchoiced_cf, choiced_cf]
-		if score[1] > 0.9:  # choiced confidence score > 0.9
+		if score[1] > 0.95:  # choiced confidence score > 0.9
 			chosed_answer = map_answer(idx)
 			results[question + 1].append(chosed_answer)
 
@@ -357,7 +411,8 @@ def process_mssv_block(mssv_block):
 	row_h = h // 10  # vẫn chia 10 hàng
 
 	# Tỉ lệ chiều ngang cho từng cột (dựa theo tỷ lệ bạn cung cấp)
-	ratios = [0.9] + [0.88] * 5 + [0.83] * 3  # tổng 9 phần
+	# ratios = [0.9] + [0.88] * 5 + [0.83] * 3  # tổng 9 phần
+	ratios = [0.6, 0.6, 0.5, 0.45, 0.5, 0.65, 0.55, 0.5, 0.55]
 	total_ratio = sum(ratios)
 	normalized_ratios = [r / total_ratio for r in ratios]
 
@@ -414,7 +469,7 @@ def process_mssv_block(mssv_block):
 		preds = model.predict_on_batch(column_imgs)
 
 		# Lấy số có xác suất tô cao
-		selected = [i for i, p in enumerate(preds) if p[1] > 0.5]
+		selected = [i for i, p in enumerate(preds) if p[1] > 0.90]
 
 		if len(selected) == 1:
 			if col_idx < 5:
@@ -433,7 +488,7 @@ def process_mssv_block(mssv_block):
 	# 		for row_idx in range(10):
 	# 			cell = digits_matrix[col_idx][row_idx]
 	# 			cv2.imshow(f"C{col_idx+1}_R{row_idx}", cell)
-	# 			cv2.waitKey(100)  # Hiển thị 100ms mỗi ô
+	# 			cv2.waitKey(1000)  # Hiển thị 100ms mỗi ô
 
 	# 	cv2.destroyAllWindows()
 

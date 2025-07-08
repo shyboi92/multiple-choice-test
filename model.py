@@ -44,8 +44,8 @@ class CNN_Model(object):
 		if self.weight_path is not None:
 			self.model.load_weights(self.weight_path)
 		# model.summary()
-		if rt:
-			return self.model
+		# if rt:
+		return self.model
 
 	@staticmethod
 	def load_data():
