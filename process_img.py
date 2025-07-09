@@ -396,7 +396,7 @@ def get_answers(list_answers):
 		question = idx // 4
 
 		# score [unchoiced_cf, choiced_cf]
-		if score[1] > 0.9:  # choiced confidence score > 0.9
+		if score[1] > 0.7:  # choiced confidence score > 0.9
 			chosed_answer = map_answer(idx)
 			results[question + 1].append(chosed_answer)
 
