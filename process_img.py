@@ -18,7 +18,7 @@ sys.stdout = open(sys.stdout.fileno(), mode='w', encoding='utf8', buffering=1)
 os.environ['TF_CPP_MIN_LOG_LEVEL'] = '3'  # Tắt log TensorFlow
 # Đặt biến này thành True
 # để hiện các kết quả và thông tin phục vụ debug
-DEBUG=True
+DEBUG=False
 
 if DEBUG:
 	logging.basicConfig(level=logging.DEBUG)
@@ -165,24 +165,24 @@ def determine_answer_blocks(img):
 	cnts = cv2.findContours(img_canny.copy(), cv2.RETR_EXTERNAL, cv2.CHAIN_APPROX_SIMPLE)
 	cnts = imutils.grab_contours(cnts)
 
-	# 4. Tìm 5 contour lớn nhất
-	cnts = sorted(cnts, key=cv2.contourArea, reverse=True)[:5]
+	# # 4. Tìm 5 contour lớn nhất
+	# cnts = sorted(cnts, key=cv2.contourArea, reverse=True)[:5]
 
-	img_contours = img.copy()
+	# img_contours = img.copy()
 
-	for i, c in enumerate(cnts):
-		x, y, w, h = cv2.boundingRect(c)
-		area = cv2.contourArea(c)
-		cv2.rectangle(img_contours, (x, y), (x + w, y + h), (0, 255, 0), 2)
-		cv2.putText(img_contours, f"#{i+1} ({w}x{h}) {area:.0f}", (x, y - 10),
-					cv2.FONT_HERSHEY_SIMPLEX, 0.5, (0, 0, 255), 1)
+	# for i, c in enumerate(cnts):
+	# 	x, y, w, h = cv2.boundingRect(c)
+	# 	area = cv2.contourArea(c)
+	# 	cv2.rectangle(img_contours, (x, y), (x + w, y + h), (0, 255, 0), 2)
+	# 	cv2.putText(img_contours, f"#{i+1} ({w}x{h}) {area:.0f}", (x, y - 10),
+	# 				cv2.FONT_HERSHEY_SIMPLEX, 0.5, (0, 0, 255), 1)
 
-		logging.debug(f"Contour {i+1}: x={x}, y={y}, w={w}, h={h}, area={area:.0f}")
+	# 	logging.debug(f"Contour {i+1}: x={x}, y={y}, w={w}, h={h}, area={area:.0f}")
 
-	# Show hình có 5 contour lớn nhất
-	cv2.imshow("Top 5 Contours", img_contours)
-	cv2.imshow("Canny edges", img_canny)
-	cv2.waitKey(0)
+	# # Show hình có 5 contour lớn nhất
+	# cv2.imshow("Top 5 Contours", img_contours)
+	# cv2.imshow("Canny edges", img_canny)
+	# cv2.waitKey(0)
 
 	cnts = sorted(cnts, key=cv2.contourArea, reverse=True)
 	ans_blocks = []
